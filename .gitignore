@@ -1,0 +1,6 @@
+# local data
+options.txt
+
+# pre upload
+compare_image
+squashfscmp
