@@ -1,0 +1,135 @@
+#!/bin/bash
+
+# Args:
+#   p1: build identifier, eg. 1118 (absolute) or -5 (relative). default -1
+#   p2: build identifier, eg. 1119 (absolute) or -4 (relative). default 0
+#
+# Env args:
+#   PROFILE1   profile of p1, default x86
+#   PROFILE2   profile of p2, default x86
+#   (PROFILE will set both PROFILE1 and PROFILE2)
+#
+#   MINDELTA     minimum size delta to be reported, default $DEFMINDELTA. Disable with 0 (no size comparison)
+#   REVERSE      reverse comparison of p1/p2, default blank (disabled) - any value to enable
+#   NOMISSING    exclude missing not found in p1, default blank (disabled) - any value to enable
+#   NONEW        exclude new files found in p2, default blank (disabled) - any value to enable
+#   NOMAPSONAME  don't map p2 soname to p1 soname when soname changes (and don't warn when detected), default blank (do map)
+#                any value to enable and treat files with different soname version as unique files (both will appear in missing/new)
+#   NOMAPKERNEL  don't map p2 kernel modules to p1 modules, default blank (do remap)
+#                any value to enable and treat files from different kernel versions as unique files (both will appear in missing/new)
+#   NAMESORT     sort within each group by filename not by delta, default blank (sort by delta) - any value to enable
+#
+#   NOCLEANUP    don't cleanup work files, default blank (disabled) - any value to enable
+#
+# Example:
+#
+#   PROFILE1=pi2 PROFILE2=pi2-testing ./squashfscmp 1118 1119b
+#   NAMESORT=y PROFILE1=x86 PROFILE2=x86 ./squashfscmp -3 0
+#
+
+#BIN=/home/neil/projects
+BIN=~/projects
+
+DEFMINDELTA=0
+
+export MINDELTA=${MINDELTA:-${DEFMINDELTA}}
+
+TMPFILE1_DAT=/tmp/t1.dat
+TMPFILE2_DAT=/tmp/t2.dat
+
+TMPFILE1_SIZE=/tmp/t1.size
+TMPFILE2_SIZE=/tmp/t2.size
+
+[ -z "${NOCLEANUP}" ] && trap "rm -f ${TMPFILE1_DAT} ${TMPFILE2_DAT} ${TMPFILE1_SIZE} ${TMPFILE2_SIZE}" EXIT
+
+getosversion()
+{
+  source SYS/etc/os-release
+  echo $VERSION
+}
+
+extractfile()
+{
+  local datfile=$2 sizefile=$3
+  (
+    local newbuild kfile
+
+    ${BIN}/latest.sh extractm $1 >/dev/null
+    cd ${BIN}/extract
+
+    [ -f kernel.img ] && kfile="kernel.img" || kfile="KERNEL"
+
+    echo "SYSTEM $(stat -c%s SYSTEM)" >${sizefile}
+    echo "KERNEL $(stat -c%s ${kfile})" >>${sizefile}
+
+    newbuild="$(ls -1d milhouse.* 2>/dev/null | sed 's/^milhouse\.//g')"
+    [ -n "${newbuild}" ] && newbuild="#${newbuild}" || newbuild="$(getosversion)"
+
+    cd SYS
+    find . -type f -print0 | xargs -0 ls --full-time >${datfile}
+#    find . -type l -print0 | xargs -0 ls --full-time | grep "\-> busybox$" >>${datfile}
+    find . -type l -print0 | xargs -0 ls --full-time >>${datfile}
+    cd ..
+    sudo umount SYS
+
+    [ -n "${newbuild}" ] && echo "${newbuild}"
+  )
+}
+
+getvalue()
+{
+  local file=$1 value=$2
+
+  awk "/^$2/{print \$2}" $file
+}
+
+unsquashed_stats()
+{
+  local build1=$1 build2=$2 size1=$3 size2=$4
+  local v1 v2 dv ml
+
+  echo
+
+  for token in SYSTEM KERNEL; do
+    v1="$(getvalue ${size1} ${token})"
+    v2="$(getvalue ${size2} ${token})"
+    dv=$((v2 - v1))
+    [ ${dv} -lt 0 ] && ml=less || ml=more
+    printf "%-14s Delta: %'-12.f %s: %'-12.f  %s: %'-12.f (%s in %s)\n" "${token}" ${dv} ${build2} ${v2} ${build1} ${v1} ${ml} ${build2}
+  done
+}
+
+comparefiles()
+{
+  local build1=$1 build2=$2 files1=$3 files2=$4 size1=$5 size2=$6
+  local color
+  local pylocation
+  
+  pylocation=/freenas/data
+  [ ! -d ${pylocation} ] && pylocation=$BIN
+
+  if [ -z "${COLOR}" -a -z "${COLOUR}" ]; then
+    if [ -t 1 ]; then
+      color="ON"
+    else
+      color="OFF"
+    fi
+  elif [ -n "${COLOR}" ]; then
+    color="${COLOR}"
+  elif [ -n "${COLOUR}" ]; then
+    color="${COLOUR}"
+  fi
+
+  COLOR=${color} ${pylocation}/squashfscmp.py ${build1} ${build2} ${files1} ${files2}
+  
+  unsquashed_stats ${build1} ${build2} ${size1} ${size2}  
+}
+
+BUILD1="$(PROFILE=${PROFILE1:-${PROFILE:-x86}} extractfile "${1:--1}" ${TMPFILE1_DAT} ${TMPFILE1_SIZE})"
+BUILD2="$(PROFILE=${PROFILE2:-${PROFILE:-x86}} extractfile "${2:-0}" ${TMPFILE2_DAT} ${TMPFILE2_SIZE})"
+
+if [ -z "${REVERSE}" ]; then
+  comparefiles "${BUILD1:-$1}" "${BUILD2}" ${TMPFILE1_DAT} ${TMPFILE2_DAT} ${TMPFILE1_SIZE} ${TMPFILE2_SIZE}
+else
+  comparefiles "${BUILD2:-$2}" "${BUILD1}" ${TMPFILE2_DAT} ${TMPFILE1_DAT} ${TMPFILE2_SIZE} ${TMPFILE1_SIZE}
+fi
