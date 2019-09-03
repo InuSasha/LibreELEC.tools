@@ -16,6 +16,9 @@ BUILD_NAME=${1}
 if [ -z "${BUILD_NAME}" -a ! -z "${STY}" ]; then
   BUILD_NAME=$(cut -d '.' -f 2 <<< $STY)
 fi
+if [ -z "${BUILD_NAME}" ]; then
+  BUILD_NAME="build"
+fi
 
 BUILD_LOG=.work/$BUILD_NAME.log
 FAIL_LOG=.work/$BUILD_NAME.fail
@@ -26,29 +29,19 @@ case $BUILD_NAME in
   "Generic")    export ARCH=        DEVICE=         PROJECT=;;
   "LePotato")   export ARCH=arm     DEVICE=LePotato PROJECT=Amlogic;;
   "Rockchip")   export ARCH=arm     DEVICE=RK3399   PROJECT=Rockchip;;
+  "Renegade")   export ARCH=arm     DEVICE=RK3328   PROJECT=Rockchip;;
   "RPi2")       export ARCH=arm     DEVICE=RPi2     PROJECT=RPi;;
   "RPi")        export ARCH=arm     DEVICE=RPi      PROJECT=RPi;;
   "WeTek_Core") export ARCH=arm     DEVICE=         PROJECT=WeTek_Core;;
   "WeTek_Play") export ARCH=arm     DEVICE=         PROJECT=WeTek_Play;;
 esac
 
-# get all addon packages
-IFS="
-"
-export IFS
-addons=$(
-  find packages projects/*/packages -name 'package.mk' \
-    | xargs grep 'PKG_IS_ADDON="yes"' \
-    | sed 's|/package.mk:.*$||;s|^.*/||g' \
-    | sort -u
-)
-
 # prepare build
 mkdir -p .work
 rm -f $BUILD_LOG $FAIL_LOG
 
 # make the image build
-( make
+( make image
   if [ $? == 0 ]; then
     printf "##### OK IMAGE $(printf '#%.0s' {1..${cols}})\n" | cut -c 1-${cols}
   else
@@ -59,21 +52,7 @@ rm -f $BUILD_LOG $FAIL_LOG
   | tee -a $BUILD_LOG
 
 # make addons
-for addon in $addons; do
-  printf "##### $addon $(printf '#%.0s' {1..${cols}})\n" | cut -c 1-${cols}
-
-  # build addon
-  ./scripts/create_addon $addon
-  ret=$?
-
-  # check return
-  if [ $ret == 0 ]; then
-    printf "##### OK $addon $(printf '#%.0s' {1..${cols}})\n" | cut -c 1-${cols}
-  else
-    printf "##### FAIL $addon $(printf '#%.0s' {1..${cols}})\n" | cut -c 1-${cols}
-    echo $addon >> $FAIL_LOG
-  fi
-done \
+./scripts/create_addon all \
   2>&1 \
   | tee -a $BUILD_LOG
 
