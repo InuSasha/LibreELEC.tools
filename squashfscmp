@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -e
 
 # Args:
 #   p1: build identifier, eg. 1118 (absolute) or -5 (relative). default -1
@@ -27,20 +27,16 @@
 #   NAMESORT=y PROFILE1=x86 PROFILE2=x86 ./squashfscmp -3 0
 #
 
-#BIN=/home/neil/projects
-BIN=~/projects
-
+BIN=$(dirname $0)
 DEFMINDELTA=0
 
 export MINDELTA=${MINDELTA:-${DEFMINDELTA}}
 
-TMPFILE1_DAT=/tmp/t1.dat
-TMPFILE2_DAT=/tmp/t2.dat
+[ -z "${TMP_PATH}" ] && TMP_PATH="/tmp/librelec/squashfscmp"
+TMP1_PATH="${TMP_PATH}/t1"
+TMP2_PATH="${TMP_PATH}/t2"
 
-TMPFILE1_SIZE=/tmp/t1.size
-TMPFILE2_SIZE=/tmp/t2.size
-
-[ -z "${NOCLEANUP}" ] && trap "rm -f ${TMPFILE1_DAT} ${TMPFILE2_DAT} ${TMPFILE1_SIZE} ${TMPFILE2_SIZE}" EXIT
+[ -z "${NOCLEANUP}" ] && trap "rm -rf ${TMP1_PATH} ${TMP2_PATH}" EXIT
 
 getosversion()
 {
@@ -50,29 +46,26 @@ getosversion()
 
 extractfile()
 {
-  local datfile=$2 sizefile=$3
-  (
+  local build_file="${1}" tmp_path="${2}"
+  ( set -e
     local newbuild kfile
 
-    ${BIN}/latest.sh extractm $1 >/dev/null
-    cd ${BIN}/extract
+    mkdir -p "${tmp_path}/extract" "${tmp_path}/system"
+    tar -xf "${build_file}" -C "${tmp_path}/extract" --strip-component=1
+    cd "${tmp_path}/extract/target"
 
     [ -f kernel.img ] && kfile="kernel.img" || kfile="KERNEL"
 
-    echo "SYSTEM $(stat -c%s SYSTEM)" >${sizefile}
-    echo "KERNEL $(stat -c%s ${kfile})" >>${sizefile}
+    echo "SYSTEM $(stat -c%s SYSTEM)" > "${tmp_path}/size"
+    echo "KERNEL $(stat -c%s ${kfile})" >> "${tmp_path}/size"
 
-    newbuild="$(ls -1d milhouse.* 2>/dev/null | sed 's/^milhouse\.//g')"
-    [ -n "${newbuild}" ] && newbuild="#${newbuild}" || newbuild="$(getosversion)"
-
-    cd SYS
-    find . -type f -print0 | xargs -0 ls --full-time >${datfile}
-#    find . -type l -print0 | xargs -0 ls --full-time | grep "\-> busybox$" >>${datfile}
-    find . -type l -print0 | xargs -0 ls --full-time >>${datfile}
-    cd ..
-    sudo umount SYS
-
-    [ -n "${newbuild}" ] && echo "${newbuild}"
+    sudo mount ./SYSTEM "${tmp_path}/system"
+    cd ${tmp_path}/system
+    find . -type f -print0 | xargs -0 ls --full-time > "${tmp_path}/data"
+    # find . -type l -print0 | xargs -0 ls --full-time | grep "\-> busybox$" >> "${tmp_path}/data"
+    find . -type l -print0 | xargs -0 ls --full-time >> "${tmp_path}/data"
+    cd "${tmp_path}"
+    sudo umount "${tmp_path}/system"
   )
 }
 
@@ -125,11 +118,11 @@ comparefiles()
   unsquashed_stats ${build1} ${build2} ${size1} ${size2}  
 }
 
-BUILD1="$(PROFILE=${PROFILE1:-${PROFILE:-x86}} extractfile "${1:--1}" ${TMPFILE1_DAT} ${TMPFILE1_SIZE})"
-BUILD2="$(PROFILE=${PROFILE2:-${PROFILE:-x86}} extractfile "${2:-0}" ${TMPFILE2_DAT} ${TMPFILE2_SIZE})"
+extractfile "${1}" "${TMP1_PATH}"
+extractfile "${2}" "${TMP2_PATH}"
 
 if [ -z "${REVERSE}" ]; then
-  comparefiles "${BUILD1:-$1}" "${BUILD2}" ${TMPFILE1_DAT} ${TMPFILE2_DAT} ${TMPFILE1_SIZE} ${TMPFILE2_SIZE}
+  comparefiles "${1}" "${2}" "${TMP1_PATH}/data" "${TMP2_PATH}/data" "${TMP1_PATH}/size" "${TMP2_PATH}/size"
 else
-  comparefiles "${BUILD2:-$2}" "${BUILD1}" ${TMPFILE2_DAT} ${TMPFILE1_DAT} ${TMPFILE2_SIZE} ${TMPFILE1_SIZE}
+  comparefiles "${2}" "${1}" "${TMP2_PATH}/data" "${TMP1_PATH}/data" "${TMP1_PATH}/size" "${TMP1_PATH}/size"
 fi
