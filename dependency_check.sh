@@ -8,9 +8,8 @@ while [ $# -gt 0 ]; do
             param_use_old=yes
             ;;
         *)
-            echo "Unknown paramter: $1"
-            abort=yes
-    esac
+            package_list+="$1"
+        esac
 
     shift
 done
@@ -112,9 +111,10 @@ if [ "${param_use_old}" == "no" ]; then
 fi
 
 # make plan
-if [ "${param_use_old}" == "no" ]; then
+if [ -z "${package_list}" ]; then
     package_list="image $(get_addons all)"
-    #package_list="toolchain:host"
+fi
+if [ "${param_use_old}" == "no" ]; then
     ./tools/viewplan ${package_list} \
         | ${exec_path}/dependency_plan.py \
         | sort -rn \
@@ -139,7 +139,7 @@ while true; do
         fi
     done
 
-    while true; do
+    while [ -n "${package}" ]; do
         if ! ./scripts/build_mt "${package}" ; then
             rm -rf fail.${package}.${build_dir}
             mv ${build_dir} fail.${package}.${build_dir}
@@ -169,9 +169,5 @@ while true; do
                 fi
             fi
         done
-
-        if [ -z "${package}" ]; then
-            break
-        fi
     done
 done
