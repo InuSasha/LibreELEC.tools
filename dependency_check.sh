@@ -2,13 +2,15 @@
 
 abort=no
 param_use_old=no
+package_list=""
+
 while [ $# -gt 0 ]; do
     case $1 in
         '-o'|'--old') 
             param_use_old=yes
             ;;
         *)
-            package_list+="$1"
+            package_list+=" $1"
         esac
 
     shift
